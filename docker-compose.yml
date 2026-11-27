@@ -7,6 +7,8 @@ services:
     cpus: 1.5
     env_file:
       - .env
+    environment:
+      - DATA_DIR=/data
     volumes:
       - wpp_sticker_data:/data
     expose:

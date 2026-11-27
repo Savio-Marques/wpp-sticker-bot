@@ -8,8 +8,14 @@ import type { Logger } from 'pino';
 import { normalizeJid, type AccessContext, type WhitelistStore } from '../access/whitelist.js';
 import type { AppConfig } from '../config/env.js';
 import {
+  AudioTooLargeError,
+  convertAudioToStickerOpus,
+  NoAudioTrackError,
+} from '../media/audioConverter.js';
+import {
   downloadValidatedMedia,
   extractMediaTarget,
+  extractSoundStickerTarget,
   MediaTooLargeError,
 } from '../media/downloader.js';
 import { StickerTooLargeError } from '../media/exif.js';
@@ -17,6 +23,7 @@ import { convertImageToSticker } from '../media/imageConverter.js';
 import { convertVideoToSticker } from '../media/videoConverter.js';
 import { JobQueue, QueueFullError } from '../queue/jobQueue.js';
 import type { SentMessageTracker } from '../whatsapp/antiLoop.js';
+import { sendSoundSticker } from '../whatsapp/soundSticker.js';
 import { extractMessageText, parseCommand } from './parser.js';
 
 export interface RouterDeps {
@@ -32,6 +39,7 @@ const HELP_TEXT = [
   '*Bot de Figurinhas*',
   '• `!fig` ou `!s` na legenda de uma imagem, GIF ou vídeo — cria figurinha 512×512.',
   '• `!fig` ou `!s` respondendo uma imagem, GIF ou vídeo — cria figurinha.',
+  '• `!figsom` ou `!ss` em um vídeo com áudio, ou imagem respondendo um áudio — cria figurinha com som.',
   '• Vídeos/GIFs são cortados automaticamente nos primeiros segundos.',
   '• `!help` — mostra esta ajuda.',
 ].join('\n');
@@ -162,6 +170,7 @@ export function createMessageRouter(deps: RouterDeps) {
   ): Promise<void> {
     const remoteJid = msg.key.remoteJid;
     if (!remoteJid || isJidStatusBroadcast(remoteJid)) return;
+    const chatJid: string = remoteJid;
     if (!msg.message) return;
     if (antiLoop.has(msg.key.id)) return;
 
@@ -194,6 +203,96 @@ export function createMessageRouter(deps: RouterDeps) {
       return;
     }
 
+    async function runWithStatus(
+      kindLabel: string,
+      task: () => Promise<void>,
+    ): Promise<void> {
+      await react(sock, msg, '⏳');
+      try {
+        await task();
+        await react(sock, msg, '');
+      } catch (error) {
+        await react(sock, msg, '❌');
+        let reason = 'Não foi possível criar a figurinha. Tente outra mídia.';
+        if (
+          error instanceof MediaTooLargeError ||
+          error instanceof StickerTooLargeError ||
+          error instanceof QueueFullError ||
+          error instanceof NoAudioTrackError ||
+          error instanceof AudioTooLargeError
+        ) {
+          reason = error.message;
+        }
+        logger.warn({ err: error, remoteJid: chatJid, kind: kindLabel }, 'Erro ao gerar figurinha');
+        await sendTracked(sock, chatJid, { text: `❌ ${reason}` }, msg);
+      }
+    }
+
+    if (cmd.name === 'sound_sticker') {
+      const target = extractSoundStickerTarget(msg);
+      if (!target || target.mode === 'missing-audio') {
+        await sendTracked(
+          sock,
+          remoteJid,
+          {
+            text: 'Envie um vídeo com áudio usando `!figsom`, ou envie uma imagem com `!figsom` respondendo a um áudio.',
+          },
+          msg,
+        );
+        return;
+      }
+
+      await runWithStatus(target.mode, async () => {
+        const result = await jobQueue.enqueue(async () => {
+          if (target.mode === 'video') {
+            const rawVideo = await downloadValidatedMedia(
+              target.video,
+              config.maxInputMb,
+              sock,
+              logger,
+            );
+            const [webp, audio] = await Promise.all([
+              convertVideoToSticker(rawVideo, {
+                pack: config.stickerPack,
+                author: config.stickerAuthor,
+                maxDurationSec: config.maxVideoSeconds,
+                ffmpegPath,
+              }),
+              convertAudioToStickerOpus(rawVideo, {
+                maxDurationSec: config.maxVideoSeconds,
+                ffmpegPath,
+              }),
+            ]);
+            return { webp, isAnimated: true, ogg: audio.buffer, seconds: audio.seconds };
+          }
+
+          const [rawImage, rawAudio] = await Promise.all([
+            downloadValidatedMedia(target.image, config.maxInputMb, sock, logger),
+            downloadValidatedMedia(target.audio, config.maxInputMb, sock, logger),
+          ]);
+          const [webp, audio] = await Promise.all([
+            convertImageToSticker(rawImage, {
+              pack: config.stickerPack,
+              author: config.stickerAuthor,
+            }),
+            convertAudioToStickerOpus(rawAudio, {
+              maxDurationSec: config.maxAudioSeconds,
+              ffmpegPath,
+            }),
+          ]);
+          return { webp, isAnimated: false, ogg: audio.buffer, seconds: audio.seconds };
+        });
+
+        await sendSoundSticker(sock, remoteJid, {
+          ...result,
+          quoted: msg,
+          logger,
+          onMessageId: (id) => antiLoop.track(id),
+        });
+      });
+      return;
+    }
+
     const mediaTarget = extractMediaTarget(msg);
     if (!mediaTarget) {
       await sendTracked(
@@ -205,9 +304,7 @@ export function createMessageRouter(deps: RouterDeps) {
       return;
     }
 
-    await react(sock, msg, '⏳');
-
-    try {
+    await runWithStatus(mediaTarget.kind, async () => {
       const stickerBuffer = await jobQueue.enqueue(async () => {
         const rawMedia = await downloadValidatedMedia(
           mediaTarget,
@@ -232,19 +329,6 @@ export function createMessageRouter(deps: RouterDeps) {
       });
 
       await sendTracked(sock, remoteJid, { sticker: stickerBuffer }, msg);
-      await react(sock, msg, '');
-    } catch (error) {
-      await react(sock, msg, '❌');
-      let reason = 'Não foi possível criar a figurinha. Tente outra mídia.';
-      if (
-        error instanceof MediaTooLargeError ||
-        error instanceof StickerTooLargeError ||
-        error instanceof QueueFullError
-      ) {
-        reason = error.message;
-      }
-      logger.warn({ err: error, remoteJid, kind: mediaTarget.kind }, 'Erro ao gerar figurinha');
-      await sendTracked(sock, remoteJid, { text: `❌ ${reason}` }, msg);
-    }
+    });
   };
 }

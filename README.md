@@ -5,6 +5,7 @@ Bot enxuto de criação de figurinhas para WhatsApp usando **Baileys v7**, **Sha
 ## Recursos
 
 - Converte **imagens**, **GIFs** e **vídeos** em figurinhas WebP `512×512` (corte quadrado centralizado).
+- Cria **figurinhas com som** (`!figsom` / `!ss`) a partir de vídeos com áudio ou imagem respondendo a um áudio/nota de voz.
 - Vídeos e GIFs são cortados automaticamente nos primeiros `MAX_VIDEO_SECONDS` (padrão `7s`) com compressão adaptativa para respeitar o limite de **500 KB** do WhatsApp.
 - Injeta metadados EXIF fixos (`STICKER_PACK` e `STICKER_AUTHOR`) via `node-webpmux`.
 - Seguro para rodar no **número pessoal** (`fromMe: true` com proteção anti-loop e `markOnlineOnConnect: false`).
@@ -13,6 +14,7 @@ Bot enxuto de criação de figurinhas para WhatsApp usando **Baileys v7**, **Sha
 ## Comandos
 
 - `!fig` ou `!s` (na legenda da mídia ou respondendo uma mídia): cria a figurinha.
+- `!figsom` ou `!ss`: cria figurinha **com som** (em um vídeo com áudio, ou enviando imagem com `!figsom` respondendo a um áudio).
 - `!help`: mostra os comandos disponíveis.
 - `!allow` (somente dono): libera o chat/grupo atual. Use `!allow 5511999999999` para liberar um número específico.
 - `!deny` (somente dono): remove o chat/grupo atual ou o número informado da whitelist.
@@ -45,6 +47,7 @@ Veja [`.env.example`](.env.example).
 | `STICKER_PACK` | Nome do pacote na figurinha | `Sticker Bot` |
 | `STICKER_AUTHOR` | Autor da figurinha | `WhatsApp Bot` |
 | `MAX_VIDEO_SECONDS` | Duração máxima de vídeos/GIFs | `7` |
+| `MAX_AUDIO_SECONDS` | Duração máxima do áudio (Imagem + Áudio) | `10` |
 | `MAX_INPUT_MB` | Tamanho máximo da mídia de entrada (MB) | `25` |
 | `MAX_CONCURRENT_JOBS` | Conversões simultâneas | `2` |
 | `MAX_QUEUE_SIZE` | Máximo de itens aguardando na fila | `20` |

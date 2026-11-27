@@ -3,6 +3,7 @@ import { unwrapMessage } from '../media/downloader.js';
 
 export type ParsedCommand =
   | { name: 'sticker' }
+  | { name: 'sound_sticker' }
   | { name: 'help' }
   | { name: 'allow'; target?: string }
   | { name: 'deny'; target?: string }
@@ -21,6 +22,9 @@ export function parseCommand(text: string | null | undefined): ParsedCommand | n
     case '!fig':
     case '!s':
       return { name: 'sticker' };
+    case '!figsom':
+    case '!ss':
+      return { name: 'sound_sticker' };
     case '!help':
       return { name: 'help' };
     case '!allow':

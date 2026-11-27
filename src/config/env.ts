@@ -7,6 +7,7 @@ export interface AppConfig {
   stickerPack: string;
   stickerAuthor: string;
   maxVideoSeconds: number;
+  maxAudioSeconds: number;
   maxInputMb: number;
   maxConcurrentJobs: number;
   maxQueueSize: number;
@@ -59,6 +60,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     stickerPack: env.STICKER_PACK?.trim() || 'Sticker Bot',
     stickerAuthor: env.STICKER_AUTHOR?.trim() || 'WhatsApp Bot',
     maxVideoSeconds: parsePositiveInt(env.MAX_VIDEO_SECONDS, 7, 'MAX_VIDEO_SECONDS'),
+    maxAudioSeconds: parsePositiveInt(env.MAX_AUDIO_SECONDS, 10, 'MAX_AUDIO_SECONDS'),
     maxInputMb: parsePositiveInt(env.MAX_INPUT_MB, 25, 'MAX_INPUT_MB'),
     maxConcurrentJobs: parsePositiveInt(env.MAX_CONCURRENT_JOBS, 2, 'MAX_CONCURRENT_JOBS'),
     maxQueueSize: parsePositiveInt(env.MAX_QUEUE_SIZE, 20, 'MAX_QUEUE_SIZE'),

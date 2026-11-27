@@ -7,13 +7,18 @@ import {
 } from '@whiskeysockets/baileys';
 import type { Logger } from 'pino';
 
-export type MediaKind = 'image' | 'video';
+export type MediaKind = 'image' | 'video' | 'audio';
 
 export interface MediaTarget {
   kind: MediaKind;
   message: WAMessage;
   fileLength?: number;
 }
+
+export type SoundStickerTarget =
+  | { mode: 'video'; video: MediaTarget }
+  | { mode: 'image+audio'; image: MediaTarget; audio: MediaTarget }
+  | { mode: 'missing-audio' };
 
 export class MediaTooLargeError extends Error {
   constructor(sizeBytes: number, maxMb: number) {
@@ -58,6 +63,7 @@ function parseFileLength(value: number | bigint | { toNumber(): number } | null 
 
 function detectMediaContent(
   content: WAMessageContent | undefined,
+  includeAudio = false,
 ): { kind: MediaKind; fileLength?: number } | null {
   if (!content) return null;
   if (content.imageMessage) {
@@ -72,6 +78,12 @@ function detectMediaContent(
       fileLength: parseFileLength(content.videoMessage.fileLength),
     };
   }
+  if (includeAudio && content.audioMessage) {
+    return {
+      kind: 'audio',
+      fileLength: parseFileLength(content.audioMessage.fileLength),
+    };
+  }
   return null;
 }
 
@@ -84,6 +96,22 @@ function findQuotedContextInfo(content: WAMessageContent | undefined) {
     content.documentMessage?.contextInfo ??
     content.stickerMessage?.contextInfo
   );
+}
+
+function buildQuotedWAMessage(
+  msg: WAMessage,
+  contextInfo: NonNullable<ReturnType<typeof findQuotedContextInfo>>,
+  quotedContent: WAMessageContent,
+): WAMessage {
+  return {
+    key: {
+      remoteJid: msg.key.remoteJid,
+      id: contextInfo.stanzaId ?? undefined,
+      participant: contextInfo.participant ?? undefined,
+      fromMe: false,
+    },
+    message: quotedContent,
+  };
 }
 
 export function extractMediaTarget(msg: WAMessage): MediaTarget | null {
@@ -108,21 +136,66 @@ export function extractMediaTarget(msg: WAMessage): MediaTarget | null {
     return null;
   }
 
-  const quotedMessage: WAMessage = {
-    key: {
-      remoteJid: msg.key.remoteJid,
-      id: contextInfo.stanzaId ?? undefined,
-      participant: contextInfo.participant ?? undefined,
-      fromMe: false,
-    },
-    message: quotedContent,
-  };
-
   return {
     kind: quotedMedia.kind,
-    message: quotedMessage,
+    message: buildQuotedWAMessage(msg, contextInfo, quotedContent!),
     fileLength: quotedMedia.fileLength,
   };
+}
+
+export function extractSoundStickerTarget(msg: WAMessage): SoundStickerTarget | null {
+  const ownContent = unwrapMessage(msg.message);
+  const ownMedia = detectMediaContent(ownContent);
+
+  const contextInfo = findQuotedContextInfo(ownContent);
+  const quotedContent = contextInfo?.quotedMessage
+    ? unwrapMessage(contextInfo.quotedMessage)
+    : undefined;
+  const quotedMedia = detectMediaContent(quotedContent, true);
+
+  if (ownMedia?.kind === 'image' && quotedMedia?.kind === 'audio' && contextInfo && quotedContent) {
+    return {
+      mode: 'image+audio',
+      image: {
+        kind: 'image',
+        message: { ...msg, message: ownContent },
+        fileLength: ownMedia.fileLength,
+      },
+      audio: {
+        kind: 'audio',
+        message: buildQuotedWAMessage(msg, contextInfo, quotedContent),
+        fileLength: quotedMedia.fileLength,
+      },
+    };
+  }
+
+  if (ownMedia?.kind === 'video') {
+    return {
+      mode: 'video',
+      video: {
+        kind: 'video',
+        message: { ...msg, message: ownContent },
+        fileLength: ownMedia.fileLength,
+      },
+    };
+  }
+
+  if (quotedMedia?.kind === 'video' && contextInfo && quotedContent) {
+    return {
+      mode: 'video',
+      video: {
+        kind: 'video',
+        message: buildQuotedWAMessage(msg, contextInfo, quotedContent),
+        fileLength: quotedMedia.fileLength,
+      },
+    };
+  }
+
+  if (ownMedia?.kind === 'image' || quotedMedia?.kind === 'image') {
+    return { mode: 'missing-audio' };
+  }
+
+  return null;
 }
 
 export async function downloadValidatedMedia(

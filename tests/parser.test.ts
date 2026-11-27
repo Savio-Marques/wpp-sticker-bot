@@ -10,6 +10,13 @@ describe('parseCommand', () => {
     expect(parseCommand('!S   algo')).toEqual({ name: 'sticker' });
   });
 
+  it('parses !figsom and !ss case-insensitively with extra whitespace', () => {
+    expect(parseCommand('!figsom')).toEqual({ name: 'sound_sticker' });
+    expect(parseCommand('  !FIGSOM  ')).toEqual({ name: 'sound_sticker' });
+    expect(parseCommand('!ss')).toEqual({ name: 'sound_sticker' });
+    expect(parseCommand('!SS  teste')).toEqual({ name: 'sound_sticker' });
+  });
+
   it('parses !help and !list', () => {
     expect(parseCommand('!help')).toEqual({ name: 'help' });
     expect(parseCommand('!LIST')).toEqual({ name: 'list' });
